@@ -1,0 +1,23 @@
+[project]
+name = "ramune-shell"
+version = "0.1.0"
+description = "Remote machine control for AI agents via MCP"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+
+[tool.uv.workspace]
+members = ["mcp", "worker", "protocol"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0",
+    "pytest-asyncio>=0.26",
+    "ramune-shell-protocol",
+    "ramune-shell-worker",
+    "ramune-shell-mcp",
+]
+
+[tool.uv.sources]
+ramune-shell-protocol = { workspace = true }
+ramune-shell-worker = { workspace = true }
+ramune-shell-mcp = { workspace = true }
