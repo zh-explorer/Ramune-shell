@@ -98,8 +98,12 @@ ramune-server / ramune-client
 
 - 简单命令：`exec(host, command="...")`
 - 复杂脚本：agent 先用 Write tool 写文件到本地，再调用 `exec(host, file="/tmp/script.sh")`
-- 截屏等二进制数据通过 MCP 原生 image content 返回
 - 认证、传输细节全部封装在 MCP Server 内部，agent 无感知
+- 输出策略：
+  - 文本结果：直接返回，超限时渐进式截断（字符串→列表→兜底），完整输出写文件
+  - 二进制数据（截屏、下载文件等）：MCP server 写本地文件，只返回文件路径，agent 用 Read 读取
+  - 不通过 MCP context 返回大体积二进制数据（base64 编码 token 消耗不确定且可能很高）
+  - 截断输出只是 fallback，插件应主动处理大结果
 
 ### Host 管理
 
@@ -140,9 +144,45 @@ ramune-server / ramune-client
 - **通信层**：SSH（channel 多路复用，复用 ssh config / 密钥，paramiko）
 - **GUI 操作**：不使用 VNC，远端 Client 直接调用平台工具（scrot/xdotool/pyautogui），图片通过 msgpack 协议返回
 
-## 实现计划
+## 已完成
 
-- [ ] 协议层完善（Request/Response 收发、超时、重试）
-- [ ] MCP tool 接口定义
-- [ ] 插件清单（首批实现哪些）
-- [ ] Server / Client 骨架搭建
+- [x] 协议层（Request/Response、msgpack 序列化、长度前缀帧）
+- [x] Worker daemon（TCP server、dispatch、内建命令）
+- [x] MCP server（FastMCP、connector、动态 tool 注册）
+- [x] 插件系统（目录扫描、平台过滤、metadata 驱动注册）
+- [x] exec 插件（首个插件，端到端验证通过）
+
+## TODO
+
+### MCP 层任务管理
+
+- [ ] MCP 层超时机制：tool call 超时后返回 task_id，内部请求继续执行
+- [ ] result 缓存：worker 响应到达后缓存，等 AI 用 task_id 来取
+- [ ] get_result(task_id) tool：轮询异步结果
+- [ ] cancel(task_id)：MCP → worker 发送 cancel request，handler 自行取消
+
+### Host 管理（MCP tool）
+
+- [ ] host_add(name, host, port, ...) — agent 部署好 worker 后自行注册
+- [ ] host_remove(name)
+- [ ] host_list() — 查询可用机器和连接状态
+- [ ] 请求路由：tool call 的 host 参数 → 找到对应 connector 转发
+
+### SSH 通信层
+
+- [ ] SSH 传输（paramiko，channel 多路复用转发到 worker loopback）
+- [ ] SSH 连接管理（复用连接、断线重连）
+
+### Worker 部署
+
+- [ ] 由 agent 自行完成，框架不实现自动部署
+- [ ] 两种部署方式：
+  - 裸机：安装 uv → uv 装 Python → uv sync → uv run 启动
+  - 容器：拉 Docker 镜像直接跑
+- [ ] 部署完成后 agent 调 host_add 注册
+- [ ] MCP description 不写部署步骤（污染上下文），放独立文档，description 只引用链接
+
+### 插件
+
+- [ ] 更多插件（文件传输、GUI 操控、网络通道等）
+- [ ] 插件依赖安装（requirements.txt + uv）

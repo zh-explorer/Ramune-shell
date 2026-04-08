@@ -8,8 +8,19 @@ from mcp.server.fastmcp import FastMCP
 
 from ramune_shell_mcp.connector import WorkerConnector
 from ramune_shell_mcp.plugins import discover_metadata, register_plugin_tools
+from ramune_shell_mcp.tasks import TaskManager
+from ramune_shell_mcp.tools import register_builtin_tools
 
-mcp = FastMCP("ramune-shell")
+mcp = FastMCP(
+    "ramune-shell",
+    port=9900,
+    instructions=(
+        "Ramune-shell: remote machine control for AI agents. "
+        "All tools require a `host` parameter to specify the target machine. "
+        "Long-running calls may return a task_id — use get_result to poll, cancel_task to abort."
+    ),
+)
+task_manager = TaskManager(default_timeout=30.0)
 
 DEFAULT_PLUGINS_DIR = Path(__file__).resolve().parents[3] / "plugins"
 
@@ -23,27 +34,8 @@ def get_connector(host: str = "default") -> WorkerConnector:
     return _connectors[host]
 
 
-# Built-in tools
-@mcp.tool()
-async def ping(host: str = "default") -> dict:
-    """Ping the remote worker to check connectivity."""
-    connector = get_connector(host)
-    resp = await connector.call("ping")
-    if resp.error:
-        return {"error": resp.error.message}
-    return resp.result
+# Register tools
+register_builtin_tools(mcp, get_connector, task_manager)
 
-
-@mcp.tool()
-async def list_plugins(host: str = "default") -> dict:
-    """List plugins loaded on the remote worker."""
-    connector = get_connector(host)
-    resp = await connector.call("list_plugins")
-    if resp.error:
-        return {"error": resp.error.message}
-    return resp.result
-
-
-# Register plugin tools from metadata
 _tools_metadata = discover_metadata(DEFAULT_PLUGINS_DIR)
-register_plugin_tools(mcp, _tools_metadata, get_connector)
+register_plugin_tools(mcp, _tools_metadata, get_connector, task_manager)

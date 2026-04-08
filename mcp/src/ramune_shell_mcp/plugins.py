@@ -12,7 +12,7 @@ from typing import Any, Annotated
 from pydantic import Field
 from mcp.server.fastmcp import FastMCP
 
-from ramune_shell_mcp.connector import WorkerConnector
+from ramune_shell_mcp.tasks import TaskManager
 
 log = logging.getLogger(__name__)
 
@@ -57,16 +57,18 @@ def register_plugin_tools(
     mcp_server: FastMCP,
     tools: list[dict[str, Any]],
     get_connector,
+    task_manager: TaskManager,
 ) -> None:
     """Register plugin tools as MCP tools from metadata."""
     for meta in tools:
-        _register_one(mcp_server, meta, get_connector)
+        _register_one(mcp_server, meta, get_connector, task_manager)
 
 
 def _register_one(
     mcp_server: FastMCP,
     meta: dict[str, Any],
     get_connector,
+    task_manager: TaskManager,
 ) -> None:
     """Register a single plugin tool on the MCP server."""
     tool_name = meta["name"]
@@ -106,29 +108,30 @@ def _register_one(
                 )
             )
 
-    # host is optional, goes after required params
     host_param = inspect.Parameter(
         "host",
         inspect.Parameter.POSITIONAL_OR_KEYWORD,
-        annotation=Annotated[str, Field(description="Target host identifier")],
-        default="default",
+        annotation=str,
     )
 
-    parameters = required_params + [host_param] + optional_params
+    parameters = [host_param] + required_params + optional_params
     sig = inspect.Signature(parameters, return_annotation=dict)
 
     # Create the tool function
-    async def _tool_fn(_tool_name=tool_name, **kwargs):
-        host = kwargs.pop("host", "default")
-        connector = get_connector(host)
-        resp = await connector.call(f"plugin:{_tool_name}", kwargs)
-        if resp.error:
-            return {"error": resp.error.message}
-        return resp.result
+    async def _tool_fn(_tool_name=tool_name, _task_mgr=task_manager, **kwargs):
+        host = kwargs.pop("host")
+
+        async def _do_call():
+            connector = get_connector(host)
+            resp = await connector.call(f"plugin:{_tool_name}", kwargs)
+            if resp.error:
+                return {"error": resp.error.message}
+            return resp.result
+
+        return await _task_mgr.execute(_do_call())
 
     _tool_fn.__name__ = tool_name
     _tool_fn.__qualname__ = tool_name
-    _tool_fn.__doc__ = description
     _tool_fn.__signature__ = sig
 
-    mcp_server.tool()(_tool_fn)
+    mcp_server.tool(description=description)(_tool_fn)
