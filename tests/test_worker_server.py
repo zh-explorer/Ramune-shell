@@ -13,8 +13,10 @@ import ramune_shell_worker.handlers  # noqa: F401
 
 
 async def send_request(port: int, req: Request) -> Response:
-    """Connect, send a request, read the response."""
+    """Connect, send type byte + request, read the response."""
+    from ramune_shell_protocol import TYPE_RQ
     reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    writer.write(TYPE_RQ)
     writer.write(req.to_bytes())
     await writer.drain()
     resp = await Response.async_read(reader)

@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
-from ramune_shell_protocol.commands import Method, Ping, Shutdown, ListPlugins, Cancel
+from ramune_shell_protocol.commands import (
+    Method, Ping, Shutdown, ListPlugins, Cancel, OpenSession,
+)
 from ramune_shell_worker.dispatch import handler, cancel_request, _PLUGIN_META
+from ramune_shell_worker.sessions import session_manager
 
 
 @handler(Method.PING)
@@ -32,3 +35,11 @@ async def handle_list_plugins(cmd: ListPlugins):
         for name, meta in _PLUGIN_META.items()
     ]
     return ListPlugins.Result(plugins=plugins).model_dump()
+
+
+@handler(Method.OPEN_SESSION)
+async def handle_open_session(cmd: OpenSession):
+    result = session_manager.create()
+    return OpenSession.Result(**result).model_dump()
+
+

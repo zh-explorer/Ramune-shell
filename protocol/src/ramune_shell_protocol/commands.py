@@ -19,6 +19,7 @@ class Method(str, Enum):
     SHUTDOWN = "shutdown"
     LIST_PLUGINS = "list_plugins"
     CANCEL = "cancel"
+    OPEN_SESSION = "open_session"
 
 
 class Command(BaseModel):
@@ -59,10 +60,18 @@ class Cancel(Command):
         cancelled: bool
 
 
+class OpenSession(Command):
+    method: ClassVar[Method] = Method.OPEN_SESSION
+
+    class Result(BaseModel):
+        session_id: str
+        token: str
+
+
 # method name -> Command class
 COMMAND_TYPES: dict[str, type[Command]] = {
     cmd.method.value: cmd
-    for cmd in [Ping, Shutdown, ListPlugins, Cancel]
+    for cmd in [Ping, Shutdown, ListPlugins, Cancel, OpenSession]
 }
 
 

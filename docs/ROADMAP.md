@@ -288,30 +288,29 @@ plugins/<name>/
 
 **控制平面**（所有插件）：R/Q 连接，一发一收
 
-**数据 session**（按需创建）：Frame channel，用于流式场景（PTY、实时日志等）
+**数据 session**（按需创建）：单条全双工 Frame channel，用于流式场景（PTY、实时日志等）
 
 ```text
 简单插件（ping、exec）：
   R/Q 连接: Request → Response → 归还池
 
 流式插件（PTY）：
-  R/Q 连接: Request("open_session") → Response({session_id, send_token, recv_token})
-  Frame 连接 A (MCP → Worker): send_token 标识，MCP 侧 send()
-  Frame 连接 B (MCP → Worker): recv_token 标识，MCP 侧 recv()
+  R/Q 连接: Request("open_session") → Response({session_id, token})
+  Frame 连接 (全双工): token 标识，MCP 和 Worker 同时 send/recv
   R/Q 连接: Request("close_session") → Response(ok)
 ```
 
 Session 抽象：
 ```python
 session = await open_session(host)
-await session.send(data)     # 写一帧到 Frame 连接 A
-data = await session.recv()  # 读一帧从 Frame 连接 B
+await session.send(data)     # 写一帧
+data = await session.recv()  # 读一帧
+# send 和 recv 可并发，TCP 全双工
 await session.close()
 ```
 
-- 两条 Frame 连接都由 MCP 侧发起（Worker 不反连）
-- Worker 根据 token 配对为一个 session
-- session 只管帧收发，插件自定义协议
+- Frame channel 无 ACK，TCP 保证可靠有序
+- 一条连接 = 一个 session，全双工
 - Raw channel 留给特殊插件（dup fd 给子进程等）
 
 #### TODO
