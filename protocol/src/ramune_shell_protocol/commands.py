@@ -57,6 +57,36 @@ COMMAND_TYPES: dict[str, type[Command]] = {
 }
 
 
+class PluginInvocation:
+    """Lightweight wrapper for plugin tool calls.
+
+    Not a Command subclass — plugins use raw params dicts
+    and the "plugin:" method prefix on the wire.
+    """
+
+    PREFIX = "plugin:"
+
+    def __init__(self, tool_name: str, params: dict[str, Any] | None = None) -> None:
+        self.tool_name = tool_name
+        self.params = params or {}
+
+    @property
+    def method(self) -> str:
+        return f"{self.PREFIX}{self.tool_name}"
+
+    @classmethod
+    def from_method(cls, method: str, params: dict[str, Any]) -> PluginInvocation:
+        """Parse a "plugin:xxx" method string into a PluginInvocation."""
+        if not method.startswith(cls.PREFIX):
+            raise ValueError(f"not a plugin method: {method}")
+        tool_name = method[len(cls.PREFIX):]
+        return cls(tool_name, params)
+
+    @classmethod
+    def is_plugin_method(cls, method: str) -> bool:
+        return method.startswith(cls.PREFIX)
+
+
 def command_from_params(method: str, params: dict[str, Any]) -> Command:
     """Reconstruct a typed Command from wire method + params."""
     cls = COMMAND_TYPES.get(method)

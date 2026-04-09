@@ -154,24 +154,76 @@ ramune-server / ramune-client
 
 ## TODO
 
-### MCP 层任务管理
+### MCP 层任务管理（已完成基础框架）
 
-- [ ] MCP 层超时机制：tool call 超时后返回 task_id，内部请求继续执行
-- [ ] result 缓存：worker 响应到达后缓存，等 AI 用 task_id 来取
-- [ ] get_result(task_id) tool：轮询异步结果
-- [ ] cancel(task_id)：MCP → worker 发送 cancel request，handler 自行取消
+- [x] MCP 层超时机制：tool call 超时后返回 task_id，内部请求继续执行
+- [x] result 缓存：worker 响应到达后缓存，等 AI 用 task_id 来取
+- [x] get_result(task_id) tool：轮询异步结果
+- [x] cancel(task_id)：取消运行中的任务
+- [ ] cancel 向 worker 传递：MCP → worker 发送 cancel request，handler 自行取消（不可取消的用子进程 + kill）
 
-### Host 管理（MCP tool）
+### Host 管理（已完成基础框架）
 
-- [ ] host_add(name, host, port, ...) — agent 部署好 worker 后自行注册
-- [ ] host_remove(name)
-- [ ] host_list() — 查询可用机器和连接状态
-- [ ] 请求路由：tool call 的 host 参数 → 找到对应 connector 转发
+- [x] host_add(name, host, port) — TcpHost，dev 模式直连
+- [x] host_remove(name)
+- [x] host_list() — 查询可用机器
+- [x] 请求路由：tool call 的 host 参数 → 找到对应 connector 转发
+- [ ] ssh_host_add — SshHost，生产模式 SSH 连接
+- [ ] HostInfo 扩展：机器基础信息（OS、架构等），通过插件获取
 
 ### SSH 通信层
 
-- [ ] SSH 传输（paramiko，channel 多路复用转发到 worker loopback）
-- [ ] SSH 连接管理（复用连接、断线重连）
+#### 设计
+
+两种 Host 类型：
+- `TcpHost`：dev 模式，直连 worker TCP 端口，无认证
+- `SshHost`：生产模式，通过 SSH 连接远端机器
+
+```text
+[asyncio event loop]                    [SSH thread]
+
+async call(req) ──→ Queue ──→ SshSession (paramiko)
+                                 ├── connect / auth
+                                 ├── open_channel (direct-tcpip → worker)
+                                 ├── read / write (msgpack protocol)
+                                 ├── keepalive / reconnect
+                                 └── sftp / exec (额外 SSH 能力)
+result ←── Future ←────────── response (loop.call_soon_threadsafe)
+```
+
+核心组件：
+
+**SshSession** — 独立线程，拥有 paramiko 连接
+- 生命周期独立于 asyncio 事件循环
+- 内部全同步 paramiko 代码，不外泄
+- 对外暴露 async 接口：call / sftp_get / sftp_put / exec
+- async 侧通过 asyncio.Future 拿结果，SSH 线程用 `loop.call_soon_threadsafe` 回传
+- 负责 keepalive、断线检测、自动重连
+
+**认证** — 支持多种方式：
+- SSH config（`~/.ssh/config`）别名：`ssh_host_add(name, alias="my-vm")`
+- 显式指定：`ssh_host_add(name, host, user, key_file, ...)`
+- SSH agent 转发
+- paramiko 的 SSHConfig 类解析 ssh config
+
+**MCP tools**：
+- `ssh_host_add(name, alias)` — 从 ssh config 读取配置
+- `ssh_host_add(name, host, user, ...)` — 显式指定连接参数
+
+**显式 SSH channel 管理**（选择方案 A 而非端口转发）：
+- 每个 request 开一个 direct-tcpip channel 到远端 worker 的 loopback 端口
+- 可直接使用 SSH 的其他能力：SFTP 文件传输、SSH exec 命令执行
+- 插件可按需使用这些能力
+
+#### TODO
+
+- [ ] SshSession 类（独立线程 + paramiko）
+- [ ] async 接口（Queue + Future 桥接）
+- [ ] SSH config 解析
+- [ ] SshHost 类 + ssh_host_add tool
+- [ ] SFTP 文件传输接口
+- [ ] SSH exec 接口
+- [ ] 断线重连 / keepalive
 
 ### Worker 部署
 
@@ -179,10 +231,11 @@ ramune-server / ramune-client
 - [ ] 两种部署方式：
   - 裸机：安装 uv → uv 装 Python → uv sync → uv run 启动
   - 容器：拉 Docker 镜像直接跑
-- [ ] 部署完成后 agent 调 host_add 注册
+- [ ] 部署完成后 agent 调 host_add / ssh_host_add 注册
 - [ ] MCP description 不写部署步骤（污染上下文），放独立文档，description 只引用链接
 
 ### 插件
 
 - [ ] 更多插件（文件传输、GUI 操控、网络通道等）
 - [ ] 插件依赖安装（requirements.txt + uv）
+- [ ] sysinfo 插件：获取机器基础信息，host_add 后自动调用填充 HostInfo

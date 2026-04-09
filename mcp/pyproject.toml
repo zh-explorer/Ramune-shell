@@ -2,7 +2,7 @@
 name = "ramune-shell-mcp"
 version = "0.1.0"
 description = "MCP server for Ramune-shell remote machine control"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = {text = "MIT"}
 dependencies = [
     "mcp>=1.8.0",

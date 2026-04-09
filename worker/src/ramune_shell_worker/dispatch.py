@@ -6,7 +6,11 @@ import logging
 from typing import Any, Callable
 
 from ramune_shell_protocol import Request, Response, ErrorCode
-from ramune_shell_protocol.commands import Method, command_from_params
+from ramune_shell_protocol.commands import (
+    Method,
+    PluginInvocation,
+    command_from_params,
+)
 
 log = logging.getLogger(__name__)
 
@@ -16,8 +20,6 @@ _HANDLERS: dict[Method, Callable] = {}
 # Plugin handlers: tool_name -> async fn(params: dict) -> result
 _PLUGIN_HANDLERS: dict[str, Callable] = {}
 _PLUGIN_META: dict[str, dict[str, Any]] = {}
-
-PLUGIN_PREFIX = "plugin:"
 
 
 def handler(method: Method):
@@ -41,7 +43,7 @@ def register_plugins(
 async def dispatch(req: Request) -> Response:
     """Route a request to the appropriate handler."""
     try:
-        if req.method.startswith(PLUGIN_PREFIX):
+        if PluginInvocation.is_plugin_method(req.method):
             return await _dispatch_plugin(req)
         else:
             return await _dispatch_command(req)
@@ -73,13 +75,13 @@ async def _dispatch_command(req: Request) -> Response:
 
 async def _dispatch_plugin(req: Request) -> Response:
     """Dispatch a plugin tool call."""
-    tool_name = req.method[len(PLUGIN_PREFIX):]
-    handler_fn = _PLUGIN_HANDLERS.get(tool_name)
+    invocation = PluginInvocation.from_method(req.method, req.params)
+    handler_fn = _PLUGIN_HANDLERS.get(invocation.tool_name)
     if handler_fn is None:
         return Response.fail(
             req.id, ErrorCode.METHOD_NOT_FOUND,
-            f"unknown plugin: {tool_name}",
+            f"unknown plugin: {invocation.tool_name}",
         )
 
-    result = await handler_fn(req.params)
+    result = await handler_fn(invocation.params)
     return Response.ok(req.id, result)

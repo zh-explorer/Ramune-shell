@@ -12,6 +12,7 @@ from typing import Any, Annotated
 from pydantic import Field
 from mcp.server.fastmcp import FastMCP
 
+from ramune_shell_protocol.commands import PluginInvocation
 from ramune_shell_mcp.tasks import TaskManager
 
 log = logging.getLogger(__name__)
@@ -123,7 +124,8 @@ def _register_one(
 
         async def _do_call():
             connector = get_connector(host)
-            resp = await connector.call(f"plugin:{_tool_name}", kwargs)
+            invocation = PluginInvocation(_tool_name, kwargs)
+            resp = await connector.call(invocation.method, invocation.params)
             if resp.error:
                 return {"error": resp.error.message}
             return resp.result

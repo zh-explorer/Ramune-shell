@@ -40,4 +40,10 @@ def main(
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=9800)
+    parser.add_argument("--plugins-dir", type=Path, default=None)
+    args = parser.parse_args()
+    main(host=args.host, port=args.port, plugins_dir=args.plugins_dir)
