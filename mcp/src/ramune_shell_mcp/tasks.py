@@ -12,7 +12,7 @@ import itertools
 from enum import Enum
 from typing import Any
 
-from ramune_shell_mcp.output import limit_output
+from ramune_shell_mcp.output import OutputStore
 
 _global_counter = itertools.count(1)
 
@@ -71,9 +71,10 @@ class Task:
 class TaskManager:
     """Manages in-flight tasks and their results."""
 
-    def __init__(self, default_timeout: float = 30.0) -> None:
+    def __init__(self, default_timeout: float = 30.0, output_store: OutputStore | None = None) -> None:
         self._tasks: dict[str, Task] = {}
         self.default_timeout = default_timeout
+        self._output = output_store or OutputStore()
 
     async def execute(
         self,
@@ -100,18 +101,15 @@ class TaskManager:
         task = Task(task_id, async_task)
         self._tasks[task_id] = task
 
-        # Set up callback to capture result when done
         async_task.add_done_callback(lambda fut: self._on_done(task, fut))
 
         try:
             result = await asyncio.wait_for(
                 asyncio.shield(async_task), timeout=timeout
             )
-            # Completed within timeout — return result directly, clean up
             self._tasks.pop(task_id, None)
-            return limit_output(result) if isinstance(result, dict) else result
+            return self._limit(result)
         except asyncio.TimeoutError:
-            # Still running — return task_id for polling
             return {
                 "task_id": task_id,
                 "status": "running",
@@ -119,7 +117,6 @@ class TaskManager:
             }
 
     def _on_done(self, task: Task, fut: asyncio.Future) -> None:
-        """Callback when the underlying coroutine finishes."""
         if task.is_done:
             return
         try:
@@ -134,7 +131,6 @@ class TaskManager:
             task.fail(str(e))
 
     def get_result(self, task_id: str) -> dict[str, Any]:
-        """Get the result of a task. Removes completed tasks from cache."""
         task = self._tasks.get(task_id)
         if task is None:
             return {"task_id": task_id, "status": "not_found"}
@@ -142,11 +138,10 @@ class TaskManager:
             self._tasks.pop(task_id, None)
         result = task.to_dict()
         if task.is_done and "result" in result:
-            result["result"] = limit_output(result["result"]) if isinstance(result["result"], dict) else result["result"]
+            result["result"] = self._limit(result["result"])
         return result
 
     def cancel(self, task_id: str) -> dict[str, Any]:
-        """Cancel a running task (MCP side). Also cancels the asyncio task."""
         task = self._tasks.get(task_id)
         if task is None:
             return {"task_id": task_id, "status": "not_found"}
@@ -156,6 +151,11 @@ class TaskManager:
         task.cancel()
         return task.to_dict()
 
-    @property
-    def tasks(self) -> dict[str, Task]:
-        return self._tasks
+    def cleanup(self) -> None:
+        """Cleanup output files. Call on shutdown."""
+        self._output.cleanup()
+
+    def _limit(self, result: Any) -> Any:
+        if isinstance(result, dict):
+            return self._output.limit(result)
+        return result

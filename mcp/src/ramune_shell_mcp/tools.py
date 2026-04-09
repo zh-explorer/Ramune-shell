@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Annotated
 
 from pydantic import Field
@@ -9,6 +10,9 @@ from mcp.server.fastmcp import FastMCP
 
 from ramune_shell_mcp.hosts import HostManager
 from ramune_shell_mcp.tasks import TaskManager, next_request_id
+
+PING_TIMEOUT = 10.0
+CANCEL_TIMEOUT = 5.0
 
 
 def register_builtin_tools(
@@ -70,7 +74,10 @@ def register_builtin_tools(
 
     @mcp_server.tool(description="Ping remote worker.")
     async def ping(host: str) -> dict:
-        return await _call(host, "ping")
+        try:
+            return await asyncio.wait_for(_call(host, "ping"), timeout=PING_TIMEOUT)
+        except asyncio.TimeoutError:
+            return {"error": "ping timeout"}
 
     @mcp_server.tool(description="List plugins on remote worker.")
     async def list_plugins(host: str) -> dict:
@@ -89,7 +96,10 @@ def register_builtin_tools(
         if host:
             try:
                 connector = host_manager.get_connector(host)
-                await connector.call("cancel", {"request_id": task_id}, request_id=next_request_id())
-            except Exception:
+                await asyncio.wait_for(
+                    connector.call("cancel", {"request_id": task_id}, request_id=next_request_id()),
+                    timeout=CANCEL_TIMEOUT,
+                )
+            except (asyncio.TimeoutError, Exception):
                 pass  # best-effort
         return result

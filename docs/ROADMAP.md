@@ -234,8 +234,95 @@ result ←── Future ←────────── response (loop.call_so
 - [ ] 部署完成后 agent 调 host_add / ssh_host_add 注册
 - [ ] MCP description 不写部署步骤（污染上下文），放独立文档，description 只引用链接
 
-### 插件
+### 插件系统重构（双端插件 + 数据 session）
 
-- [ ] 更多插件（文件传输、GUI 操控、网络通道等）
+#### 双端插件
+
+插件不再只是 worker 侧的 handler。每个插件分两端：
+
+```text
+plugins/<name>/
+├── metadata.py          # 共享：tool 定义
+├── mcp_handler.py       # MCP 侧：请求预处理、响应后处理
+└── worker_handler.py    # Worker 侧：实际执行
+```
+
+- MCP 侧插件：接收 tool call → 预处理（读本地文件等）→ 发 request → 后处理（存文件等）→ 返回 agent
+- Worker 侧插件：收 request → 执行 → 发 response
+- 简单插件可省略 mcp_handler.py，走默认的透传逻辑
+
+#### 连接协议
+
+每条新连接第一个字节标识类型：
+
+| Type | 值 | 用途 | 生命周期 |
+|---|---|---|---|
+| R/Q | `0x01` | request-response | 用完归还连接池 |
+| Frame | `0x02` | 单向帧通道（session 数据） | 跟随 session |
+| Raw | `0x03` | 原始字节流（dup 给子进程等） | 跟随 session |
+
+连接建立流程：
+```text
+新连接:
+  字节 0: type
+
+  type=0x01 (R/Q):
+    [4B len][msgpack Request] → [4B len][msgpack Response]
+    完成后归还连接池
+
+  type=0x02 (Frame):
+    [4B len][token 帧] → [4B len][data 帧] → ...
+    Worker 用 token 配对到 session
+
+  type=0x03 (Raw):
+    [4B len][token 帧] → raw bytes...
+    特殊场景：fd 可 dup 给子进程
+```
+
+连接池（R/Q 连接复用）：
+- R/Q 请求完成后连接归还池，下次复用
+- 定时 ping 保活，超时回收
+- 减少连接建立开销
+
+#### 双平面通信
+
+**控制平面**（所有插件）：R/Q 连接，一发一收
+
+**数据 session**（按需创建）：Frame channel，用于流式场景（PTY、实时日志等）
+
+```text
+简单插件（ping、exec）：
+  R/Q 连接: Request → Response → 归还池
+
+流式插件（PTY）：
+  R/Q 连接: Request("open_session") → Response({session_id, send_token, recv_token})
+  Frame 连接 A (MCP → Worker): send_token 标识，MCP 侧 send()
+  Frame 连接 B (MCP → Worker): recv_token 标识，MCP 侧 recv()
+  R/Q 连接: Request("close_session") → Response(ok)
+```
+
+Session 抽象：
+```python
+session = await open_session(host)
+await session.send(data)     # 写一帧到 Frame 连接 A
+data = await session.recv()  # 读一帧从 Frame 连接 B
+await session.close()
+```
+
+- 两条 Frame 连接都由 MCP 侧发起（Worker 不反连）
+- Worker 根据 token 配对为一个 session
+- session 只管帧收发，插件自定义协议
+- Raw channel 留给特殊插件（dup fd 给子进程等）
+
+#### TODO
+
+- [ ] 连接协议：type 字节 + R/Q / Frame / Raw 分流
+- [ ] 连接池（R/Q 复用 + ping 保活）
+- [ ] 双端插件结构（mcp_handler.py + worker_handler.py）
+- [ ] MCP 侧插件注册逻辑（自定义预处理/后处理）
+- [ ] Session 抽象（send/recv 帧接口）
+- [ ] open_session / close_session 控制命令
+- [ ] Worker 侧 session 管理（token 配对）
+- [ ] 更多插件（文件传输、GUI 操控、PTY 等）
 - [ ] 插件依赖安装（requirements.txt + uv）
-- [ ] sysinfo 插件：获取机器基础信息，host_add 后自动调用填充 HostInfo
+- [ ] sysinfo 插件：获取机器基础信息

@@ -12,10 +12,10 @@ import asyncio
 import logging
 import os
 import threading
-from dataclasses import dataclass
 from typing import Any, Callable
 
 import paramiko
+from pydantic import BaseModel
 
 from ramune_shell_protocol import Request, Response
 from ramune_shell_protocol.codec import HEADER
@@ -23,8 +23,7 @@ from ramune_shell_protocol.codec import HEADER
 log = logging.getLogger(__name__)
 
 
-@dataclass
-class SshConfig:
+class SshConfig(BaseModel):
     """SSH connection configuration."""
 
     host: str = ""
@@ -114,9 +113,10 @@ class _Op:
 class SshSession:
     """SSH session backed by paramiko. Thread-safe for concurrent operations."""
 
-    def __init__(self, config: SshConfig, worker_port: int = 9800) -> None:
+    def __init__(self, config: SshConfig, worker_port: int = 9800, connect_timeout: float = 15.0) -> None:
         self._config = config
         self._worker_port = worker_port
+        self._connect_timeout = connect_timeout
         self._client: paramiko.SSHClient | None = None
         self._lock = threading.Lock()
         self._keepalive_timer: threading.Timer | None = None
@@ -248,7 +248,7 @@ class SshSession:
                      resolved.get("username"), resolved["hostname"], resolved["port"])
             self._client = paramiko.SSHClient()
             self._client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            self._client.connect(**resolved)
+            self._client.connect(**resolved, timeout=self._connect_timeout)
             log.info("SSH connected")
 
     def _disconnect(self) -> None:
