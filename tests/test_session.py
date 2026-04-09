@@ -4,13 +4,13 @@ import asyncio
 
 import pytest
 
-from ramune_shell_worker.server import WorkerServer
-from ramune_shell_worker.sessions import session_manager
-from ramune_shell_mcp.connector import WorkerConnector
-from ramune_shell_mcp.session import open_session
-from ramune_shell_mcp.tasks import next_request_id
+from ramune_shell.worker.server import WorkerServer
+from ramune_shell.worker.sessions import session_manager
+from ramune_shell.mcp.connector import WorkerConnector
+from ramune_shell.mcp.session import open_session
+from ramune_shell.mcp.tasks import next_request_id
 
-import ramune_shell_worker.handlers  # noqa: F401
+import ramune_shell.worker.handlers  # noqa: F401
 
 
 async def _run_with_server(coro_fn):

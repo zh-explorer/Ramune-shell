@@ -5,11 +5,11 @@ import asyncio
 import pytest
 import pytest_asyncio
 
-from ramune_shell_worker.server import WorkerServer
-from ramune_shell_mcp.connector import WorkerConnector
-from ramune_shell_mcp.tasks import next_request_id as _rid
+from ramune_shell.worker.server import WorkerServer
+from ramune_shell.mcp.connector import WorkerConnector
+from ramune_shell.mcp.tasks import next_request_id as _rid
 
-import ramune_shell_worker.handlers  # noqa: F401
+import ramune_shell.worker.handlers  # noqa: F401
 
 
 @pytest_asyncio.fixture

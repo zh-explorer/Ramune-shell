@@ -5,16 +5,16 @@ import asyncio
 import pytest
 import pytest_asyncio
 
-from ramune_shell_protocol import Request, Response
-from ramune_shell_worker.server import WorkerServer
+from ramune_shell.protocol import Request, Response
+from ramune_shell.worker.server import WorkerServer
 
 # Import handlers to register them via @handler decorator
-import ramune_shell_worker.handlers  # noqa: F401
+import ramune_shell.worker.handlers  # noqa: F401
 
 
 async def send_request(port: int, req: Request) -> Response:
     """Connect, send type byte + request, read the response."""
-    from ramune_shell_protocol import TYPE_RQ
+    from ramune_shell.protocol import TYPE_RQ
     reader, writer = await asyncio.open_connection("127.0.0.1", port)
     writer.write(TYPE_RQ)
     writer.write(req.to_bytes())

@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from ramune_shell_mcp.tasks import TaskManager
+from ramune_shell.mcp.tasks import TaskManager
 
 
 @pytest.mark.asyncio

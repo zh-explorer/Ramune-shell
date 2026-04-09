@@ -1,6 +1,6 @@
 """Tests for the protocol package."""
 
-from ramune_shell_protocol import Request, Response, ErrorCode
+from ramune_shell.protocol import Request, Response, ErrorCode
 
 
 def test_request_roundtrip():

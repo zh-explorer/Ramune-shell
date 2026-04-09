@@ -5,7 +5,7 @@ import asyncio
 import pytest
 import pytest_asyncio
 
-from ramune_shell_protocol.channel import (
+from ramune_shell.protocol.channel import (
     FrameChannel, TYPE_RQ, TYPE_FRAME,
     write_frame, read_frame, write_token, read_token,
 )
