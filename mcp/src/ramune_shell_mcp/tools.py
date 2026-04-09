@@ -8,7 +8,7 @@ from pydantic import Field
 from mcp.server.fastmcp import FastMCP
 
 from ramune_shell_mcp.hosts import HostManager
-from ramune_shell_mcp.tasks import TaskManager
+from ramune_shell_mcp.tasks import TaskManager, next_request_id
 
 
 def register_builtin_tools(
@@ -19,7 +19,7 @@ def register_builtin_tools(
 
     async def _call(host: str, method: str):
         connector = host_manager.get_connector(host)
-        resp = await connector.call(method)
+        resp = await connector.call(method, request_id=next_request_id())
         if resp.error:
             return {"error": resp.error.message}
         return resp.result
@@ -83,5 +83,13 @@ def register_builtin_tools(
         return task_manager.get_result(task_id)
 
     @mcp_server.tool(description="Cancel a running task.")
-    async def cancel_task(task_id: str) -> dict:
-        return task_manager.cancel(task_id)
+    async def cancel_task(task_id: str, host: str | None = None) -> dict:
+        result = task_manager.cancel(task_id)
+        # Also tell the worker to cancel (task_id == request_id on wire)
+        if host:
+            try:
+                connector = host_manager.get_connector(host)
+                await connector.call("cancel", {"request_id": task_id}, request_id=next_request_id())
+            except Exception:
+                pass  # best-effort
+        return result

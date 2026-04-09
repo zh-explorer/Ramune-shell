@@ -122,15 +122,17 @@ def _register_one(
     async def _tool_fn(_tool_name=tool_name, _task_mgr=task_manager, **kwargs):
         host = kwargs.pop("host")
 
-        async def _do_call():
-            connector = get_connector(host)
-            invocation = PluginInvocation(_tool_name, kwargs)
-            resp = await connector.call(invocation.method, invocation.params)
-            if resp.error:
-                return {"error": resp.error.message}
-            return resp.result
+        def _make_coro(task_id):
+            async def _do_call():
+                connector = get_connector(host)
+                invocation = PluginInvocation(_tool_name, kwargs)
+                resp = await connector.call(invocation.method, invocation.params, request_id=task_id)
+                if resp.error:
+                    return {"error": resp.error.message}
+                return resp.result
+            return _do_call()
 
-        return await _task_mgr.execute(_do_call())
+        return await _task_mgr.execute(_make_coro)
 
     _tool_fn.__name__ = tool_name
     _tool_fn.__qualname__ = tool_name

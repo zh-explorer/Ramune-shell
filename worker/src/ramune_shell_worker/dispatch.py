@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Callable
 
@@ -21,6 +22,9 @@ _HANDLERS: dict[Method, Callable] = {}
 _PLUGIN_HANDLERS: dict[str, Callable] = {}
 _PLUGIN_META: dict[str, dict[str, Any]] = {}
 
+# Running tasks: request_id -> asyncio.Task (for cancellation)
+_RUNNING: dict[str, asyncio.Task] = {}
+
 
 def handler(method: Method):
     """Decorator to register a built-in command handler."""
@@ -38,6 +42,15 @@ def register_plugins(
     _PLUGIN_HANDLERS.update(handler_map)
     if meta_map:
         _PLUGIN_META.update(meta_map)
+
+
+def cancel_request(request_id: str) -> bool:
+    """Cancel a running request by its ID."""
+    task = _RUNNING.get(request_id)
+    if task is None:
+        return False
+    task.cancel()
+    return True
 
 
 async def dispatch(req: Request) -> Response:
@@ -74,7 +87,7 @@ async def _dispatch_command(req: Request) -> Response:
 
 
 async def _dispatch_plugin(req: Request) -> Response:
-    """Dispatch a plugin tool call."""
+    """Dispatch a plugin tool call. Tracked in _RUNNING for cancellation."""
     invocation = PluginInvocation.from_method(req.method, req.params)
     handler_fn = _PLUGIN_HANDLERS.get(invocation.tool_name)
     if handler_fn is None:
@@ -83,5 +96,14 @@ async def _dispatch_plugin(req: Request) -> Response:
             f"unknown plugin: {invocation.tool_name}",
         )
 
-    result = await handler_fn(invocation.params)
-    return Response.ok(req.id, result)
+    # Wrap handler in its own Task so cancel_request() cancels the
+    # handler, not the connection handler.
+    handler_task = asyncio.create_task(handler_fn(invocation.params))
+    _RUNNING[req.id] = handler_task
+    try:
+        result = await handler_task
+        return Response.ok(req.id, result)
+    except asyncio.CancelledError:
+        return Response.fail(req.id, ErrorCode.CANCELLED, "cancelled")
+    finally:
+        _RUNNING.pop(req.id, None)

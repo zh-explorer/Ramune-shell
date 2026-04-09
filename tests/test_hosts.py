@@ -61,6 +61,7 @@ async def test_host_add_then_ping(worker_port):
     mgr.add("local", "127.0.0.1", worker_port)
 
     connector = mgr.get_connector("local")
-    resp = await connector.call("ping")
+    from ramune_shell_mcp.tasks import next_request_id
+    resp = await connector.call("ping", request_id=next_request_id())
     assert resp.error is None
     assert resp.result == {"pong": True}

@@ -14,6 +14,14 @@ from typing import Any
 
 from ramune_shell_mcp.output import limit_output
 
+_global_counter = itertools.count(1)
+
+
+def next_request_id() -> str:
+    """Global unique ID for all requests (task_id == request_id on wire)."""
+    return f"req-{next(_global_counter):06d}"
+
+
 class TaskStatus(str, Enum):
     PENDING = "pending"
     RUNNING = "running"
@@ -25,10 +33,10 @@ class TaskStatus(str, Enum):
 class Task:
     """Tracks a single in-flight request to a worker."""
 
-    def __init__(self, task_id: str, coro: asyncio.Task) -> None:
+    def __init__(self, task_id: str, async_task: asyncio.Task) -> None:
         self.task_id = task_id
         self.status = TaskStatus.RUNNING
-        self._coro = coro
+        self._async_task = async_task
         self._result: Any = None
         self._error: str | None = None
 
@@ -65,18 +73,17 @@ class TaskManager:
 
     def __init__(self, default_timeout: float = 30.0) -> None:
         self._tasks: dict[str, Task] = {}
-        self._id_counter = itertools.count(1)
         self.default_timeout = default_timeout
-
-    def _next_id(self) -> str:
-        return f"task-{next(self._id_counter):06d}"
 
     async def execute(
         self,
-        coro,
+        coro_or_factory,
         timeout: float | None = None,
     ) -> dict[str, Any]:
         """Execute a coroutine with optional timeout.
+
+        coro_or_factory: either a coroutine, or a callable(task_id) -> coroutine.
+        The latter allows passing task_id as request_id to the worker.
 
         If the coroutine completes within timeout, return its result directly.
         If it times out, return a task_id for later polling.
@@ -84,7 +91,11 @@ class TaskManager:
         if timeout is None:
             timeout = self.default_timeout
 
-        task_id = self._next_id()
+        task_id = next_request_id()
+        if callable(coro_or_factory) and not asyncio.iscoroutine(coro_or_factory):
+            coro = coro_or_factory(task_id)
+        else:
+            coro = coro_or_factory
         async_task = asyncio.create_task(coro)
         task = Task(task_id, async_task)
         self._tasks[task_id] = task
@@ -135,12 +146,16 @@ class TaskManager:
         return result
 
     def cancel(self, task_id: str) -> dict[str, Any]:
-        """Cancel a running task."""
+        """Cancel a running task (MCP side). Also cancels the asyncio task."""
         task = self._tasks.get(task_id)
         if task is None:
             return {"task_id": task_id, "status": "not_found"}
         if task.is_done:
             return task.to_dict()
-        task._coro.cancel()
+        task._async_task.cancel()
         task.cancel()
         return task.to_dict()
+
+    @property
+    def tasks(self) -> dict[str, Task]:
+        return self._tasks

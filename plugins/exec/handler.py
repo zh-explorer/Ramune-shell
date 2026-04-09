@@ -17,7 +17,12 @@ async def exec(params: dict[str, Any]) -> dict[str, Any]:
         stderr=asyncio.subprocess.PIPE,
         cwd=cwd,
     )
-    stdout, stderr = await proc.communicate()
+    try:
+        stdout, stderr = await proc.communicate()
+    except asyncio.CancelledError:
+        proc.kill()
+        await proc.wait()
+        raise
 
     return {
         "stdout": stdout.decode(errors="replace"),

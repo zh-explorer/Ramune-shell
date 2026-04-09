@@ -136,8 +136,19 @@ class SshSession:
 
     # --- async interface ---
 
-    async def call(self, method: str, params: dict[str, Any] | None = None) -> Response:
-        return await _Op().run(self._do_call, method, params or {})
+    async def call(self, method: str, params: dict[str, Any] | None = None, *, request_id: str) -> Response:
+        try:
+            return await _Op().run(self._do_call, method, params or {}, request_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log.error("SSH call failed: %s", e)
+            from ramune_shell_protocol import ErrorCode
+            from ramune_shell_protocol.messages import ErrorInfo
+            return Response(
+                id=request_id,
+                error=ErrorInfo(code=ErrorCode.INTERNAL_ERROR, message=f"SSH error: {e}"),
+            )
 
     async def exec(self, command: str) -> dict[str, Any]:
         return await _Op().run(self._do_exec, command)
@@ -150,7 +161,7 @@ class SshSession:
 
     # --- sync operations (run in threads via _Op) ---
 
-    def _do_call(self, op: _Op, method: str, params: dict[str, Any]) -> Response:
+    def _do_call(self, op: _Op, method: str, params: dict[str, Any], request_id: str) -> Response:
         self._ensure_connected()
         channel = self._client.get_transport().open_channel(
             "direct-tcpip",
@@ -159,7 +170,7 @@ class SshSession:
         )
         op.set_resource(channel)
         try:
-            req = Request(id="ssh-0", method=method, params=params)
+            req = Request(id=request_id, method=method, params=params)
             channel.sendall(req.to_bytes())
 
             header = self._recv_exact(channel, HEADER.size)

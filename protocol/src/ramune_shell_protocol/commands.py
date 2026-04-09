@@ -18,6 +18,7 @@ class Method(str, Enum):
     PING = "ping"
     SHUTDOWN = "shutdown"
     LIST_PLUGINS = "list_plugins"
+    CANCEL = "cancel"
 
 
 class Command(BaseModel):
@@ -50,10 +51,18 @@ class ListPlugins(Command):
         plugins: list[dict[str, Any]]
 
 
+class Cancel(Command):
+    method: ClassVar[Method] = Method.CANCEL
+    request_id: str
+
+    class Result(BaseModel):
+        cancelled: bool
+
+
 # method name -> Command class
 COMMAND_TYPES: dict[str, type[Command]] = {
     cmd.method.value: cmd
-    for cmd in [Ping, Shutdown, ListPlugins]
+    for cmd in [Ping, Shutdown, ListPlugins, Cancel]
 }
 
 

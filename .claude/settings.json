@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//home/explorer/.claude/**)",
+      "Bash(uv sync:*)",
+      "Bash(kill %1)",
+      "Bash(curl -s -X POST http://127.0.0.1:8000/mcp -H \"Content-Type: application/json\" -H \"Accept: application/json, text/event-stream\" -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\",\"params\":{}}')",
+      "Bash(curl -s -X POST http://127.0.0.1:8000/mcp -H \"Content-Type: application/json\" -H \"Accept: application/json, text/event-stream\" -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"0.1\"}}}')",
+      "Bash(curl -s -i -X POST http://127.0.0.1:8000/mcp -H \"Content-Type: application/json\" -H \"Accept: application/json, text/event-stream\" -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"0.1\"}}}')",
+      "Bash(curl -s -X POST http://127.0.0.1:8000/mcp -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -H 'Mcp-Session-Id: 55b33b4d2eab418fb18586667c14bc6a' -d '{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{}}')",
+      "Bash(curl -s -X POST http://127.0.0.1:8000/mcp -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -H 'Mcp-Session-Id: 55b33b4d2eab418fb18586667c14bc6a' -d '{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"ping\",\"arguments\":{}}}')",
+      "Bash(curl -s -X POST http://127.0.0.1:8000/mcp -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -H 'Mcp-Session-Id: 55b33b4d2eab418fb18586667c14bc6a' -d '{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\",\"params\":{\"name\":\"exec\",\"arguments\":{\"command\":\"uname -a\"}}}')",
+      "Bash(git add:*)",
+      "Bash(git commit -m ':*)",
+      "Bash(git remote:*)",
+      "Bash(git push:*)"
+    ]
+  }
+}
