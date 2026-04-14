@@ -13,7 +13,12 @@
       "Bash(git add:*)",
       "Bash(git commit -m ':*)",
       "Bash(git remote:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(python -c ':*)",
+      "Bash(kill -9 3705563 3705568 3705570)",
+      "Read(//tmp/**)",
+      "Bash(find ramune_shell/transport -name \"*.py\" -exec sed -i 's/ramune_shell\\\\.protocol/ramune_shell.transport/g' {} +)",
+      "Bash(find ramune_shell/mcp ramune_shell/worker -name \"*.py\" -not -path \"*__pycache__*\" -exec sed -i 's/ramune_shell\\\\.protocol/ramune_shell.transport/g' {} +)"
     ]
   }
 }

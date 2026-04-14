@@ -1,42 +1,53 @@
-"""Built-in command handlers."""
+"""Worker-side built-in handlers.
+
+ping / close_session / open_frame_channel are handled by transport layer.
+Only business-level builtins remain here: list_features, shutdown.
+"""
 
 from __future__ import annotations
 
-from ramune_shell.protocol.commands import (
-    Method, Ping, Shutdown, ListPlugins, Cancel, OpenSession,
-)
-from ramune_shell.worker.dispatch import handler, cancel_request, get_modules
-from ramune_shell.worker.sessions import session_manager
+import asyncio
+
+from pydantic import BaseModel
+
+from ramune_shell.transport.rpc import register_rpc
+from ramune_shell.worker.dispatch import register_feature, registered_feature_names
 
 
-@handler(Method.PING)
-async def handle_ping(cmd: Ping):
-    return Ping.Result().model_dump()
+# --- list_features ---
+
+class ListFeaturesRequest(BaseModel):
+    pass
+
+class ListFeaturesResult(BaseModel):
+    features: list[str]
+
+register_rpc("list_features", ListFeaturesRequest, ListFeaturesResult)
 
 
-@handler(Method.SHUTDOWN)
-async def handle_shutdown(cmd: Shutdown):
-    import asyncio
+async def handle_list_features(req: ListFeaturesRequest) -> ListFeaturesResult:
+    return ListFeaturesResult(features=registered_feature_names())
+
+
+# --- shutdown ---
+
+class ShutdownRequest(BaseModel):
+    pass
+
+class ShutdownResult(BaseModel):
+    pass
+
+register_rpc("shutdown", ShutdownRequest, ShutdownResult)
+
+
+async def handle_shutdown(req: ShutdownRequest) -> ShutdownResult:
     loop = asyncio.get_running_loop()
     loop.call_soon(loop.stop)
-    return Shutdown.Result().model_dump()
+    return ShutdownResult()
 
 
-@handler(Method.CANCEL)
-async def handle_cancel(cmd: Cancel):
-    cancelled = cancel_request(cmd.request_id)
-    return Cancel.Result(cancelled=cancelled).model_dump()
+# --- registration ---
 
-
-@handler(Method.LIST_PLUGINS)
-async def handle_list_plugins(cmd: ListPlugins):
-    modules = list(get_modules().keys())
-    return ListPlugins.Result(plugins=modules).model_dump()
-
-
-@handler(Method.OPEN_SESSION)
-async def handle_open_session(cmd: OpenSession):
-    result = session_manager.create()
-    return OpenSession.Result(**result).model_dump()
-
-
+def register_builtins() -> None:
+    register_feature("list_features", handle_list_features)
+    register_feature("shutdown", handle_shutdown)

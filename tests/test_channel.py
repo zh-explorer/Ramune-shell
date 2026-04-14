@@ -1,96 +1,84 @@
-"""Tests for FrameChannel and connection protocol."""
+"""Tests for FrameChannel: send/recv, send_msg/recv_msg, detach, lifecycle."""
 
 import asyncio
 
 import pytest
-import pytest_asyncio
 
-from ramune_shell.protocol.channel import (
-    FrameChannel, TYPE_RQ, TYPE_FRAME,
-    write_frame, read_frame, write_token, read_token,
-)
+from ramune_shell.transport.channel import FrameChannel
+from ramune_shell.transport.messages import Request, Response
+from ramune_shell.transport.addr import OpId
 
 
-async def _make_pair() -> tuple[FrameChannel, FrameChannel]:
+async def _make_pair():
     """Create a connected pair of FrameChannels via TCP loopback."""
     ready = asyncio.Event()
-    server_channel = None
+    server_ch = None
 
     async def on_connect(reader, writer):
-        nonlocal server_channel
-        server_channel = FrameChannel(reader, writer)
+        nonlocal server_ch
+        server_ch = FrameChannel(reader, writer)
         ready.set()
 
     server = await asyncio.start_server(on_connect, "127.0.0.1", 0)
     port = server.sockets[0].getsockname()[1]
     reader, writer = await asyncio.open_connection("127.0.0.1", port)
-    client_channel = FrameChannel(reader, writer)
+    client_ch = FrameChannel(reader, writer)
     await ready.wait()
-    return client_channel, server_channel, server
+    return client_ch, server_ch, server
 
 
-@pytest.mark.asyncio
-async def test_frame_channel_send_recv():
+# --- raw bytes ---
+
+async def test_send_recv():
     client, server, srv = await _make_pair()
     try:
         await client.send(b"hello")
-        data = await server.recv()
-        assert data == b"hello"
-
+        assert await server.recv() == b"hello"
         await server.send(b"world")
-        data = await client.recv()
-        assert data == b"world"
+        assert await client.recv() == b"world"
     finally:
         await client.close()
         await server.close()
         srv.close()
 
 
-@pytest.mark.asyncio
-async def test_frame_channel_multiple_frames():
+async def test_multiple_frames():
     client, server, srv = await _make_pair()
     try:
         for i in range(10):
             await client.send(f"msg-{i}".encode())
         for i in range(10):
-            data = await server.recv()
-            assert data == f"msg-{i}".encode()
+            assert await server.recv() == f"msg-{i}".encode()
     finally:
         await client.close()
         await server.close()
         srv.close()
 
 
-@pytest.mark.asyncio
-async def test_frame_channel_large_frame():
+async def test_large_frame():
     client, server, srv = await _make_pair()
     try:
         big = b"x" * 100_000
         await client.send(big)
-        data = await server.recv()
-        assert data == big
+        assert await server.recv() == big
     finally:
         await client.close()
         await server.close()
         srv.close()
 
 
-@pytest.mark.asyncio
-async def test_frame_channel_recv_returns_none_on_close():
+async def test_recv_none_on_close():
     client, server, srv = await _make_pair()
     try:
         await client.close()
-        # Give event loop a tick to propagate close
         await asyncio.sleep(0.05)
-        data = await server.recv()
-        assert data is None
+        assert await server.recv() is None
     finally:
         await server.close()
         srv.close()
 
 
-@pytest.mark.asyncio
-async def test_frame_channel_recv_cancellable():
+async def test_recv_cancellable():
     client, server, srv = await _make_pair()
     try:
         task = asyncio.create_task(server.recv())
@@ -105,40 +93,58 @@ async def test_frame_channel_recv_cancellable():
         srv.close()
 
 
-@pytest.mark.asyncio
-async def test_frame_channel_bidirectional_concurrent():
-    """Both sides send and recv simultaneously."""
+# --- typed messages ---
+
+async def test_send_msg_recv_msg():
     client, server, srv = await _make_pair()
     try:
-        async def client_work():
-            for i in range(5):
-                await client.send(f"c{i}".encode())
-            results = []
-            for _ in range(5):
-                results.append(await client.recv())
-            return results
-
-        async def server_work():
-            results = []
-            for _ in range(5):
-                results.append(await server.recv())
-            for i in range(5):
-                await server.send(f"s{i}".encode())
-            return results
-
-        client_results, server_results = await asyncio.gather(
-            client_work(), server_work()
-        )
-        assert server_results == [f"c{i}".encode() for i in range(5)]
-        assert client_results == [f"s{i}".encode() for i in range(5)]
+        req = Request(id=OpId(session="s1", seq="r1"), method="ping", params={})
+        await client.send_msg(req)
+        got = await server.recv_msg(Request)
+        assert got is not None
+        assert got.method == "ping"
+        assert got.id.session == "s1"
     finally:
         await client.close()
         await server.close()
         srv.close()
 
 
-@pytest.mark.asyncio
-async def test_frame_channel_context_manager():
+# --- detach ---
+
+async def test_detach_returns_raw_streams():
+    client, server, srv = await _make_pair()
+    try:
+        reader, writer = client.detach()
+        assert client.closed
+        # Can still use raw streams
+        writer.write(b"raw")
+        await writer.drain()
+        writer.close()
+    finally:
+        await server.close()
+        srv.close()
+
+
+async def test_detach_fails_with_buffered_data():
+    client, server, srv = await _make_pair()
+    try:
+        await server.send(b"data")
+        await asyncio.sleep(0.05)
+        # Force data into client buffer without extracting a frame
+        raw = await client._reader.read(1024)
+        client._buf.extend(raw)
+        with pytest.raises(RuntimeError, match="unprocessed data"):
+            client.detach()
+    finally:
+        await client.close()
+        await server.close()
+        srv.close()
+
+
+# --- context manager ---
+
+async def test_context_manager():
     client, server, srv = await _make_pair()
     try:
         async with client as ch:

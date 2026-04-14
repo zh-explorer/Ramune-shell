@@ -1,7 +1,7 @@
-"""SSH session with asyncssh.
+"""SSH connector: implements Connector protocol via asyncssh direct-tcpip.
 
-Natively async — no threads, no bridging.
-SSH channels are asyncio streams, directly usable for Frame channels.
+Also provides SSH-native capabilities (exec, sftp) that bypass the
+transport session layer — used directly by mcp/hosts.py.
 """
 
 from __future__ import annotations
@@ -12,21 +12,12 @@ import os
 from typing import Any
 
 import asyncssh
-
 from pydantic import BaseModel
-
-from ramune_shell.protocol import (
-    Request, Response, ErrorCode, TYPE_RQ, TYPE_FRAME,
-    write_token,
-)
-from ramune_shell.protocol.messages import ErrorInfo
 
 log = logging.getLogger(__name__)
 
 
 class SshConfig(BaseModel):
-    """SSH connection configuration."""
-
     host: str = ""
     port: int = 22
     user: str = ""
@@ -35,7 +26,6 @@ class SshConfig(BaseModel):
     alias: str | None = None
 
     def to_connect_kwargs(self) -> dict[str, Any]:
-        """Build asyncssh.connect() kwargs."""
         if self.alias:
             return self._resolve_alias()
         result: dict[str, Any] = {
@@ -51,7 +41,6 @@ class SshConfig(BaseModel):
         return result
 
     def _resolve_alias(self) -> dict[str, Any]:
-        """Resolve alias from ~/.ssh/config. asyncssh reads config natively."""
         config_path = os.path.expanduser("~/.ssh/config")
         result: dict[str, Any] = {
             "host": self.alias,
@@ -69,13 +58,23 @@ class SshConfig(BaseModel):
         return result
 
 
-class SshSession:
-    """Async SSH session backed by asyncssh."""
+class SshConnector:
+    """Connector protocol implementation over SSH direct-tcpip.
+
+    Each connect() call opens a new SSH channel forwarded to the worker's
+    loopback port. The SSH connection itself is reused across calls.
+    """
 
     def __init__(self, config: SshConfig, worker_port: int = 9800) -> None:
         self._config = config
         self._worker_port = worker_port
         self._conn: asyncssh.SSHClientConnection | None = None
+
+    # --- Connector protocol ---
+
+    async def connect(self) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+        await self._ensure_connected()
+        return await self._conn.open_connection("127.0.0.1", self._worker_port)
 
     # --- lifecycle ---
 
@@ -87,47 +86,7 @@ class SshSession:
             self._conn.close()
             self._conn = None
 
-    # --- R/Q call (compatible with WorkerConnector.call) ---
-
-    async def call(self, method: str, params: dict[str, Any] | None = None, *, request_id: str) -> Response:
-        try:
-            await self._ensure_connected()
-            reader, writer = await self._open_direct_tcpip()
-            try:
-                # Send type byte + request
-                writer.write(TYPE_RQ)
-                req = Request(id=request_id, method=method, params=params or {})
-                writer.write(req.to_bytes())
-                await writer.drain()
-                resp = await asyncio.wait_for(Response.async_read(reader), timeout=30.0)
-                return resp
-            finally:
-                writer.close()
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:
-            log.error("SSH call failed: %s", e)
-            return Response(
-                id=request_id,
-                error=ErrorInfo(code=ErrorCode.INTERNAL_ERROR, message=f"SSH error: {e}"),
-            )
-
-    # --- Frame channel (for sessions) ---
-
-    async def open_frame_channel(self, token: str) -> tuple[asyncio.StreamReader, asyncio.StreamWriter] | None:
-        """Open an SSH direct-tcpip channel as a Frame channel."""
-        try:
-            await self._ensure_connected()
-            reader, writer = await self._open_direct_tcpip()
-            writer.write(TYPE_FRAME)
-            await writer.drain()
-            await write_token(writer, token)
-            return reader, writer
-        except Exception as e:
-            log.error("SSH frame channel failed: %s", e)
-            return None
-
-    # --- SSH exec (direct, not through worker) ---
+    # --- SSH-native capabilities (not part of Connector protocol) ---
 
     async def exec(self, command: str) -> dict[str, Any]:
         await self._ensure_connected()
@@ -137,8 +96,6 @@ class SshSession:
             "stderr": result.stderr or "",
             "exit_code": result.exit_status,
         }
-
-    # --- SFTP ---
 
     async def sftp_put(self, local_path: str, remote_path: str) -> dict[str, Any]:
         await self._ensure_connected()
@@ -155,16 +112,12 @@ class SshSession:
 
     # --- connection management ---
 
-    async def _open_direct_tcpip(self):
-        """Open a direct-tcpip channel to the worker's loopback port."""
-        return await self._conn.open_connection(
-            "127.0.0.1", self._worker_port,
-        )
-
     async def _connect(self) -> None:
         kwargs = self._config.to_connect_kwargs()
-        log.info("SSH connecting to %s@%s:%s",
-                 kwargs.get("username"), kwargs.get("host"), kwargs.get("port"))
+        log.info(
+            "SSH connecting to %s@%s:%s",
+            kwargs.get("username"), kwargs.get("host"), kwargs.get("port"),
+        )
         self._conn = await asyncssh.connect(**kwargs)
         log.info("SSH connected")
 

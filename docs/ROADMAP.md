@@ -149,8 +149,14 @@ ramune-server / ramune-client
 - [x] 协议层（Request/Response、msgpack 序列化、长度前缀帧）
 - [x] Worker daemon（TCP server、dispatch、内建命令）
 - [x] MCP server（FastMCP、connector、动态 tool 注册）
-- [x] 插件系统（目录扫描、平台过滤、metadata 驱动注册）
-- [x] exec 插件（首个插件，端到端验证通过）
+- [x] Feature 框架（@feature 装饰器、ToolContext、session-centric 模型）
+- [x] exec feature（端到端验证通过）
+- [x] 统一 ID 模型：`OpAddr(session_id, op_id)` 贯穿 Request / Response / frame handshake（task_id = session_id）
+- [x] Typed RPC：两端共享 Request/Result 模型，自动 validate
+- [x] Session-scoped frame channel：borrow 语义、创建无竞争、OpenFrameChannel 复用 Request 自身 OpAddr
+- [x] Worker 侧 `WorkerSession` + `current_session` / `current_addr` contextvar（stateful handler 支持）
+- [x] 会话关闭合并为 `CloseSession(target)`，由独立 control session 发送，无需自取消规避
+- [x] SSH 传输层：asyncssh、direct-tcpip、SFTP
 
 ## TODO
 
@@ -160,7 +166,7 @@ ramune-server / ramune-client
 - [x] result 缓存：worker 响应到达后缓存，等 AI 用 task_id 来取
 - [x] get_result(task_id) tool：轮询异步结果
 - [x] cancel(task_id)：取消运行中的任务
-- [ ] cancel 向 worker 传递：MCP → worker 发送 cancel request，handler 自行取消（不可取消的用子进程 + kill）
+- [x] cancel 向 worker 传递：MCP → worker 发送 `CloseSession(target)`，取消并清理目标 session
 
 ### Host 管理（已完成基础框架）
 
@@ -315,13 +321,13 @@ await session.close()
 
 #### TODO
 
-- [ ] 连接协议：type 字节 + R/Q / Frame / Raw 分流
-- [ ] 连接池（R/Q 复用 + ping 保活）
-- [ ] 双端插件结构（mcp_handler.py + worker_handler.py）
-- [ ] MCP 侧插件注册逻辑（自定义预处理/后处理）
-- [ ] Session 抽象（send/recv 帧接口）
-- [ ] open_session / close_session 控制命令
-- [ ] Worker 侧 session 管理（token 配对）
-- [ ] 更多插件（文件传输、GUI 操控、PTY 等）
-- [ ] 插件依赖安装（requirements.txt + uv）
-- [ ] sysinfo 插件：获取机器基础信息
+- [x] 连接协议：type 字节 + R/Q / Frame 分流
+- [x] 连接池（R/Q 复用 + 空闲超时回收）
+- [x] 双端 feature 结构（mcp/features + worker/features + protocol/rpc）
+- [x] MCP 侧 feature 注册逻辑（@feature 装饰器 + ToolContext）
+- [x] Frame channel 抽象（send/recv 帧接口）
+- [x] Worker 侧 session 管理（session_id 路由 + 无竞争 frame 握手）
+- [ ] 更多 feature（文件传输、GUI 操控、PTY 等）
+- [ ] feature 依赖安装（requirements.txt + uv）
+- [ ] sysinfo feature：获取机器基础信息
+- [ ] Raw 字节流通道（留作特殊场景，如 dup fd 给子进程）

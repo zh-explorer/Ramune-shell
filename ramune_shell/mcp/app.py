@@ -9,10 +9,10 @@ from mcp.server.fastmcp import FastMCP
 from ramune_shell.mcp.config import McpConfig
 from ramune_shell.mcp.hosts import HostManager
 from ramune_shell.mcp.output import OutputStore
-from ramune_shell.mcp.tasks import TaskManager
+from ramune_shell.mcp.executor import TaskExecutor
 from ramune_shell.mcp.tools import register_builtin_tools
-import ramune_shell.mcp.features.exec  # noqa: F401 — registers via @feature
-from ramune_shell.mcp.feature import register_all_features
+import ramune_shell.features.exec  # noqa: F401 — registers @feature + RPC
+from ramune_shell.mcp.feature import FeatureRuntime, register_all_features
 
 
 def create_app(config: McpConfig | None = None) -> FastMCP:
@@ -27,15 +27,14 @@ def create_app(config: McpConfig | None = None) -> FastMCP:
         output_dir=config.resolved_output_dir,
     )
     host_manager = HostManager()
-    task_manager = TaskManager(default_timeout=config.default_timeout, output_store=output_store)
+    executor = TaskExecutor()
+    pending_results: dict = {}  # task_id → Task, for async polling
 
     @asynccontextmanager
     async def lifespan(app):
-        # startup
         yield
-        # shutdown
         await host_manager.close_all()
-        task_manager.cleanup()
+        output_store.cleanup()
 
     server = FastMCP(
         "ramune-shell",
@@ -48,11 +47,10 @@ def create_app(config: McpConfig | None = None) -> FastMCP:
         lifespan=lifespan,
     )
 
-    def get_connector(host: str):
-        return host_manager.get_connector(host)
+    runtime = FeatureRuntime(executor, host_manager, output_store, pending_results, config.default_timeout)
 
-    register_builtin_tools(server, host_manager, task_manager)
-    register_all_features(server, get_connector, task_manager)
+    register_builtin_tools(server, host_manager, executor, output_store, pending_results)
+    register_all_features(server, runtime)
 
     return server
 

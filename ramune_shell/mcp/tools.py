@@ -9,24 +9,19 @@ from pydantic import Field
 from mcp.server.fastmcp import FastMCP
 
 from ramune_shell.mcp.hosts import HostManager
-from ramune_shell.mcp.tasks import TaskManager, next_request_id
+from ramune_shell.mcp.executor import TaskExecutor
+from ramune_shell.mcp.output import OutputStore
 
 PING_TIMEOUT = 10.0
-CANCEL_TIMEOUT = 5.0
 
 
 def register_builtin_tools(
     mcp_server: FastMCP,
     host_manager: HostManager,
-    task_manager: TaskManager,
+    executor: TaskExecutor,
+    output_store: OutputStore,
+    pending_results: dict,
 ) -> None:
-
-    async def _call(host: str, method: str):
-        connector = host_manager.get_connector(host)
-        resp = await connector.call(method, request_id=next_request_id())
-        if resp.error:
-            return {"error": resp.error.message}
-        return resp.result
 
     # --- host management ---
 
@@ -35,7 +30,7 @@ def register_builtin_tools(
         info = host_manager.add(name, host, port)
         return {"added": info.model_dump()}
 
-    @mcp_server.tool(description="Register an SSH worker. Use alias for ~/.ssh/config, or specify params explicitly.")
+    @mcp_server.tool(description="Register an SSH worker.")
     async def ssh_host_add(
         name: str,
         alias: str | None = None,
@@ -44,18 +39,13 @@ def register_builtin_tools(
         user: str = "",
         key_filename: str | None = None,
         password: str | None = None,
-        worker_port: Annotated[int, Field(description="Worker daemon listen port on remote machine")] = 9800,
+        worker_port: Annotated[int, Field(description="Worker daemon listen port")] = 9800,
     ) -> dict:
         try:
             info = await host_manager.add_ssh(
-                name=name,
-                worker_port=worker_port,
-                alias=alias,
-                host=host,
-                port=ssh_port,
-                user=user,
-                key_filename=key_filename,
-                password=password,
+                name=name, worker_port=worker_port, alias=alias,
+                host=host, port=ssh_port, user=user,
+                key_filename=key_filename, password=password,
             )
             return {"added": info.model_dump()}
         except Exception as e:
@@ -75,31 +65,59 @@ def register_builtin_tools(
     @mcp_server.tool(description="Ping remote worker.")
     async def ping(host: str) -> dict:
         try:
-            return await asyncio.wait_for(_call(host, "ping"), timeout=PING_TIMEOUT)
+            transport = host_manager.get_transport(host)
+            session = await transport.open_session()
+            try:
+                ok = await asyncio.wait_for(session.ping(), timeout=PING_TIMEOUT)
+                return {"pong": ok}
+            finally:
+                await session.close()
         except asyncio.TimeoutError:
             return {"error": "ping timeout"}
+        except Exception as e:
+            return {"error": str(e)}
 
-    @mcp_server.tool(description="List plugins on remote worker.")
-    async def list_plugins(host: str) -> dict:
-        return await task_manager.execute(_call(host, "list_plugins"))
+    @mcp_server.tool(description="List features registered on remote worker.")
+    async def list_features(host: str) -> dict:
+        transport = host_manager.get_transport(host)
+        session = await transport.open_session()
+        try:
+            resp = await session.request("list_features", {})
+            if resp.error:
+                return {"error": resp.error.message}
+            return resp.result
+        except Exception as e:
+            return {"error": str(e)}
+        finally:
+            await session.close()
 
     # --- task management ---
 
     @mcp_server.tool(description="Poll async task result.")
     async def get_result(task_id: str) -> dict:
-        return task_manager.get_result(task_id)
+        task = pending_results.get(task_id)
+        if task is None:
+            return {"task_id": task_id, "status": "not_found"}
+        if not task.is_done:
+            return {"task_id": task_id, "status": task.status.value}
+        # Done — return result and remove
+        result = task.to_dict()
+        if "result" in result:
+            result["result"] = output_store.limit(result["result"])
+        del pending_results[task_id]
+        return result
 
     @mcp_server.tool(description="Cancel a running task.")
-    async def cancel_task(task_id: str, host: str | None = None) -> dict:
-        result = task_manager.cancel(task_id)
-        # Also tell the worker to cancel (task_id == request_id on wire)
-        if host:
-            try:
-                connector = host_manager.get_connector(host)
-                await asyncio.wait_for(
-                    connector.call("cancel", {"request_id": task_id}, request_id=next_request_id()),
-                    timeout=CANCEL_TIMEOUT,
-                )
-            except (asyncio.TimeoutError, Exception):
-                pass  # best-effort
-        return result
+    async def cancel_task(task_id: str) -> dict:
+        task = pending_results.get(task_id)
+        if task is None:
+            # Maybe still in executor's active queue
+            cancelled = executor.cancel(task_id)
+            if cancelled:
+                return {"task_id": task_id, "status": "cancelled"}
+            return {"task_id": task_id, "status": "not_found"}
+        if task.is_done:
+            return task.to_dict()
+        executor.cancel(task_id)
+        del pending_results[task_id]
+        return {"task_id": task_id, "status": "cancelled"}
